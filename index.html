@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Flow Phenomenon - Organic</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+  <style>
+    body { margin: 0; padding: 0; overflow: hidden; background-color: #000; touch-action: none; }
+    #start-btn {
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      padding: 15px 30px; font-size: 16px; color: cyan; border: 1px solid cyan;
+      background: rgba(0,0,0,0.8); cursor: pointer; z-index: 100;
+      font-family: sans-serif; letter-spacing: 2px;
+    }
+  </style>
+</head>
+<body>
+
+<div id="start-btn">INITIALIZE ORGANIC FLOW</div>
+
+<script>
+let particles = [];
+const numParticles = 800; // 粒子を少し増やしました
+let noiseScale = 0.005;   // ノイズの「細かさ」。小さいほど大きなうねりになる
+let timeOffset = 0;       // 時間経過による変化用
+let isSensorActive = false;
+
+function setup() {
+  createCanvas(windowWidth, windowHeight);
+  blendMode(ADD); // 加算合成で発光表現
+  
+  for (let i = 0; i < numParticles; i++) {
+    particles.push(new Particle());
+  }
+
+  const btn = select('#start-btn');
+  btn.mousePressed(startSensors);
+}
+
+function startSensors() {
+  if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+    DeviceOrientationEvent.requestPermission()
+      .then(response => {
+        if (response === 'granted') {
+          isSensorActive = true;
+          select('#start-btn').hide();
+        }
+      });
+  } else {
+    isSensorActive = true;
+    select('#start-btn').hide();
+  }
+}
+
+function draw() {
+  blendMode(BLEND);
+  background(0, 15); // 残像を少し長く（値を小さく）して、軌跡を美しく
+  blendMode(ADD);
+
+  // --- 1. センサー重力の計算 ---
+  let gx = 0;
+  let gy = 0;
+  if (isSensorActive) {
+    gx = rotationY * 0.05; // 傾きの影響力
+    gy = rotationX * 0.05;
+  } else {
+    // デバッグ用：マウス位置へ
+    gx = (mouseX - width/2) * 0.005;
+    gy = (mouseY - height/2) * 0.005;
+  }
+
+  // --- 2. 時間経過で「場」を少しずつ変化させる ---
+  timeOffset += 0.005;
+
+  // 全粒子更新
+  for (let p of particles) {
+    p.followField(noiseScale, timeOffset); // ノイズの「風」を受ける
+    p.applyForce(gx, gy);                  // センサーの「重力」を受ける
+    p.update();
+    p.show();
+    p.edges();
+  }
+}
+
+class Particle {
+  constructor() {
+    this.pos = createVector(random(width), random(height));
+    this.vel = createVector(0, 0);
+    this.acc = createVector(0, 0);
+    this.maxSpeed = random(2, 4);
+    
+    // 色を「深海のような青緑」のグラデーションに
+    this.color = color(random(0, 50), random(100, 200), random(200, 255), 180);
+    this.size = random(1.5, 4);
+  }
+
+  // パーリンノイズによる「見えない流れ」に従う
+  followField(scale, time) {
+    // 画面上の位置(x,y)と時間(time)から、特定の「角度」を算出
+    // これにより、場所によって風向きが違う「場」が生まれる
+    let angle = noise(this.pos.x * scale, this.pos.y * scale, time) * TWO_PI * 2;
+    
+    // その角度へ向かう力を作る
+    let force = p5.Vector.fromAngle(angle);
+    force.mult(0.5); // 風の強さ
+    this.applyForce(force.x, force.y);
+  }
+
+  applyForce(x, y) {
+    this.acc.add(x, y);
+
+    // タッチした場所から逃げる（より強く設定）
+    if (touches.length > 0) {
+      let tX = touches[0].x;
+      let tY = touches[0].y;
+      let d = dist(this.pos.x, this.pos.y, tX, tY);
+      if (d < 150) {
+        let push = createVector(this.pos.x - tX, this.pos.y - tY);
+        push.normalize();
+        push.mult(2.0); // 強い反発
+        this.acc.add(push);
+      }
+    }
+  }
+
+  update() {
+    this.vel.add(this.acc);
+    this.vel.limit(this.maxSpeed);
+    this.pos.add(this.vel);
+    this.acc.mult(0);
+  }
+
+  show() {
+    stroke(this.color);
+    strokeWeight(this.size);
+    point(this.pos.x, this.pos.y);
+  }
+
+  // 画面端の処理：反対側からワープさせる
+  edges() {
+    if (this.pos.x > width) this.pos.x = 0;
+    if (this.pos.x < 0) this.pos.x = width;
+    if (this.pos.y > height) this.pos.y = 0;
+    if (this.pos.y < 0) this.pos.y = height;
+  }
+}
+
+function windowResized() {
+  resizeCanvas(windowWidth, windowHeight);
+}
+</script>
+</body>
+</html>
