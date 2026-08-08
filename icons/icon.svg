@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title description">
+  <title id="title">Flow Phenomenon</title>
+  <desc id="description">暗い場を流れるシアンの光</desc>
+  <defs>
+    <radialGradient id="background" cx="45%" cy="38%" r="78%">
+      <stop offset="0" stop-color="#09272f"/>
+      <stop offset="0.52" stop-color="#031116"/>
+      <stop offset="1" stop-color="#010507"/>
+    </radialGradient>
+    <linearGradient id="flow" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#2b8998"/>
+      <stop offset="0.45" stop-color="#76efff"/>
+      <stop offset="1" stop-color="#d9ffff"/>
+    </linearGradient>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="9" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <rect width="512" height="512" fill="url(#background)"/>
+  <g fill="none" stroke="url(#flow)" stroke-linecap="round" filter="url(#glow)">
+    <path d="M64 419C108 344 87 259 155 214s120-20 151-83 75-72 143-65" stroke-width="15" opacity=".95"/>
+    <path d="M42 369c74-78 63-128 120-169s114-29 142-91 79-53 145-52" stroke-width="7" opacity=".7"/>
+    <path d="M96 455c43-64 53-127 115-164s121-34 149-93 55-69 108-87" stroke-width="4" opacity=".5"/>
+    <path d="M56 300c51-47 91-50 136-97s80-104 183-124" stroke-width="3" opacity=".42"/>
+  </g>
+  <g fill="#bffbff" filter="url(#glow)">
+    <circle cx="116" cy="332" r="6"/>
+    <circle cx="173" cy="239" r="5"/>
+    <circle cx="267" cy="188" r="7"/>
+    <circle cx="357" cy="93" r="5"/>
+    <circle cx="407" cy="74" r="3"/>
+  </g>
+</svg>
