@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Flow Phenomenon - Agents</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+  <style>
+    body { margin: 0; overflow: hidden; background: #000; touch-action: none; font-family: sans-serif; }
+    #hud {
+      position: absolute; top: 10px; left: 10px; right: 10px; z-index: 10;
+      color: rgba(190, 235, 255, 0.85); font-size: 12px; line-height: 1.6;
+      pointer-events: none; text-shadow: 0 0 6px rgba(0, 180, 255, 0.6);
+    }
+    #hint {
+      position: absolute; bottom: 16px; left: 16px; right: 16px; z-index: 10;
+      color: rgba(180, 230, 255, 0.7); font-size: 11px; text-align: center; line-height: 1.7;
+      pointer-events: none; transition: opacity 1.5s;
+    }
+    a#back { position: absolute; top: 10px; right: 12px; z-index: 11; color: cyan; font-size: 12px; }
+  </style>
+</head>
+<body>
+<a id="back" href="index.html">← Organic</a>
+<div id="hud"></div>
+<div id="hint">タップ：タスクを投入（エージェントが流れ込む）<br>ノードを長押し：そのノードの並列数を +1 ／ ダブルタップで −1<br>赤い逆流 = 検証で差し戻された仕事</div>
+
+<script>
+// ============================================================
+// 多数のAIエージェントを「流れ」として見る
+//  - 1粒子 = 1つの仕事を運ぶエージェント
+//  - ノード = 処理工程（計画 → 実行 → 検証 → 完了）
+//  - 各ノードには「並列数（同時に処理できる数）」がある
+//  - 並列数が足りないノードの手前に粒子が溜まる = ボトルネック
+// ============================================================
+
+const stages = [
+  { name: '投入', hue: 200, work: 0,   cap: Infinity },
+  { name: '計画', hue: 270, work: 50,  cap: 3 },
+  { name: '実行', hue: 160, work: 140, cap: 6 },
+  { name: '検証', hue: 45,  work: 70,  cap: 2, failRate: 0.25 },
+  { name: '完了', hue: 120, work: 0,   cap: Infinity },
+];
+let nodes = [];          // 画面上の位置
+let agents = [];
+let done = 0, rework = 0;
+let doneTimes = [];      // スループット計算用（直近の完了時刻）
+let leadTimes = [];      // リードタイム（投入→完了の所要フレーム）
+let pressTimer = null, lastTap = 0;
+
+function setup() {
+  createCanvas(windowWidth, windowHeight);
+  colorMode(HSB, 360, 100, 100, 100);
+  layout();
+  for (let i = 0; i < 40; i++) agents.push(new Agent());
+  setTimeout(() => document.getElementById('hint').style.opacity = 0, 8000);
+}
+
+// スマホ縦画面を想定し、ノードをジグザグに縦に並べる
+function layout() {
+  const n = stages.length;
+  nodes = stages.map((s, i) => createVector(
+    width * (i % 2 === 0 ? 0.3 : 0.7),
+    map(i, 0, n - 1, height * 0.16, height * 0.88)
+  ));
+}
+
+function draw() {
+  blendMode(BLEND);
+  background(0, 0, 0, 22);
+  blendMode(ADD);
+
+  // 処理枠の空きを数える
+  const busy = stages.map(() => 0);
+  for (const a of agents) if (a.state === 'work') busy[a.stage]++;
+
+  // 待ち行列の先頭から処理を開始させる（先着順）
+  const waiting = agents.filter(a => a.state === 'wait').sort((a, b) => a.arrived - b.arrived);
+  for (const a of waiting) {
+    if (busy[a.stage] < stages[a.stage].cap) { a.startWork(); busy[a.stage]++; }
+  }
+
+  drawLinks();
+  for (const a of agents) { a.update(); a.show(); }
+  agents = agents.filter(a => !a.gone);
+  drawNodes(busy);
+  drawHud();
+}
+
+function drawLinks() {
+  strokeWeight(1);
+  for (let i = 0; i < nodes.length - 1; i++) {
+    stroke(0, 0, 40, 25);
+    line(nodes[i].x, nodes[i].y, nodes[i + 1].x, nodes[i + 1].y);
+  }
+}
+
+function drawNodes(busy) {
+  textAlign(CENTER, CENTER);
+  for (let i = 0; i < nodes.length; i++) {
+    const s = stages[i], p = nodes[i];
+    const q = agents.filter(a => a.stage === i && a.state === 'wait').length;
+    const r = 26 + min(q, 30) * 1.2;                 // 待ちが多いほどノードが膨らむ
+    noFill();
+    stroke(s.hue, q > 8 ? 90 : 50, 100, q > 8 ? 80 : 45);
+    strokeWeight(q > 8 ? 3 : 1.5);
+    circle(p.x, p.y, r * 2);
+    noStroke();
+    fill(0, 0, 100, 85);
+    textSize(13);
+    text(s.name, p.x, p.y - 6);
+    textSize(10);
+    fill(0, 0, 100, 60);
+    const capTxt = s.cap === Infinity ? '' : `${busy[i]}/${s.cap}`;
+    text(i === 4 ? `${done}` : `${capTxt}${q ? ' 待' + q : ''}`, p.x, p.y + 9);
+  }
+}
+
+function drawHud() {
+  const now = millis();
+  doneTimes = doneTimes.filter(t => now - t < 10000);
+  const tput = (doneTimes.length / 10 * 60).toFixed(0);   // 件/分
+  const lt = leadTimes.length ? (leadTimes.reduce((a, b) => a + b, 0) / leadTimes.length / 60).toFixed(1) : '-';
+  const wip = agents.filter(a => a.stage > 0 && a.stage < 4).length;
+  // ボトルネック = 待ち行列が最長の工程
+  let worst = -1, worstQ = 0;
+  for (let i = 1; i < 4; i++) {
+    const q = agents.filter(a => a.stage === i && a.state === 'wait').length;
+    if (q > worstQ) { worstQ = q; worst = i; }
+  }
+  document.getElementById('hud').innerHTML =
+    `処理中(WIP) ${wip} ・ 完了 ${done} ・ 差し戻し ${rework}<br>` +
+    `スループット ${tput}件/分 ・ リードタイム ${lt}秒<br>` +
+    (worstQ > 5 ? `⚠ ボトルネック：<b>${stages[worst].name}</b>（待ち ${worstQ}）` : '流れは滑らか');
+}
+
+class Agent {
+  constructor(x, y) {
+    this.stage = 0;
+    this.pos = createVector(x ?? nodes[0].x + random(-30, 30), y ?? nodes[0].y + random(-30, 30));
+    this.vel = p5.Vector.random2D();
+    this.state = 'move';      // move → wait → work → move …
+    this.born = frameCount;
+    this.orbit = random(TWO_PI);
+    this.retry = false;
+    this.target = 1;
+  }
+
+  startWork() {
+    this.state = 'work';
+    this.timer = stages[this.stage].work * random(0.6, 1.4);
+  }
+
+  update() {
+    const goal = nodes[this.target];
+    if (this.state === 'move') {
+      // ゴールへ向かう力 + ノイズの「揺らぎ」（各エージェントの個性）
+      const steer = p5.Vector.sub(goal, this.pos).setMag(0.35);
+      const a = noise(this.pos.x * 0.006, this.pos.y * 0.006, frameCount * 0.004) * TWO_PI * 2;
+      steer.add(p5.Vector.fromAngle(a).mult(0.25));
+      this.vel.add(steer).limit(3.2);
+      this.pos.add(this.vel);
+      if (this.pos.dist(goal) < 30) {
+        this.stage = this.target;
+        if (this.stage === 4) { this.finish(); return; }
+        this.state = 'wait';
+        this.arrived = frameCount;
+      }
+    } else {
+      // 待ち：外周をゆっくり回る ／ 処理中：内側を速く回る
+      const working = this.state === 'work';
+      this.orbit += working ? 0.08 : 0.015;
+      const rr = working ? 14 : 34 + (this.arrived % 20);
+      const t = createVector(goal.x + cos(this.orbit) * rr, goal.y + sin(this.orbit) * rr);
+      this.pos.lerp(t, 0.15);
+      if (working && --this.timer <= 0) this.next();
+    }
+  }
+
+  next() {
+    const s = stages[this.stage];
+    if (s.failRate && random() < s.failRate) {
+      // 検証NG → 実行に差し戻し（逆流）
+      this.target = this.stage - 1;
+      this.retry = true;
+      rework++;
+    } else {
+      this.target = this.stage + 1;
+      this.retry = false;
+    }
+    this.state = 'move';
+    this.vel = p5.Vector.sub(nodes[this.target], this.pos).setMag(2);
+  }
+
+  finish() {
+    done++;
+    doneTimes.push(millis());
+    leadTimes.push(frameCount - this.born);
+    if (leadTimes.length > 30) leadTimes.shift();
+    this.gone = true;
+  }
+
+  show() {
+    const hue = this.retry ? 0 : stages[this.stage === 0 && this.target ? this.target : this.stage].hue;
+    const sat = this.retry ? 90 : 70;
+    const alpha = this.state === 'work' ? 90 : 55;
+    stroke(hue, sat, 100, alpha);
+    strokeWeight(this.state === 'work' ? 4 : 2.5);
+    point(this.pos.x, this.pos.y);
+    if (this.state === 'move') {
+      strokeWeight(1);
+      line(this.pos.x, this.pos.y, this.pos.x - this.vel.x * 4, this.pos.y - this.vel.y * 4);
+    }
+  }
+}
+
+function nodeAt(x, y) {
+  return nodes.findIndex((p, i) => i > 0 && i < 4 && dist(x, y, p.x, p.y) < 50);
+}
+
+function pointerDown(x, y) {
+  const i = nodeAt(x, y);
+  const now = millis();
+  if (i > 0 && now - lastTap < 300) {               // ダブルタップ：並列数 −1
+    stages[i].cap = max(1, stages[i].cap - 1);
+    clearTimeout(pressTimer);
+    lastTap = 0;
+    return;
+  }
+  lastTap = now;
+  if (i > 0) {
+    pressTimer = setTimeout(() => { stages[i].cap++; pressTimer = null; }, 450); // 長押し：+1
+  } else {
+    for (let k = 0; k < 12; k++) agents.push(new Agent(nodes[0].x + random(-20, 20), nodes[0].y + random(-20, 20)));
+  }
+}
+
+function touchStarted(e) { if (e && e.target.tagName !== 'CANVAS') return; if (touches.length) pointerDown(touches[0].x, touches[0].y); return false; }
+function touchEnded(e) { if (e && e.target.tagName !== 'CANVAS') return; clearTimeout(pressTimer); return false; }
+function mousePressed() { if (!touches.length) pointerDown(mouseX, mouseY); }
+function mouseReleased() { clearTimeout(pressTimer); }
+
+function windowResized() { resizeCanvas(windowWidth, windowHeight); layout(); }
+</script>
+</body>
+</html>
